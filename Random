@@ -1,0 +1,378 @@
+%%writefile app.py
+# ============================================
+# 🪨💣 Rock vs Mine Prediction System — Streamlit
+# Final Version with User Revisions
+# ============================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+# import seaborn as sns # --- REMOVED: No longer needed ---
+
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+# -----------------------------
+# Page Config
+# -----------------------------
+st.set_page_config(
+    page_title="Rock vs Mine Prediction System",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# -----------------------------
+# 🎨 Colorful Custom Theme (CSS)
+# -----------------------------
+st.markdown("""
+<style>
+/* App gradient background */
+.stApp {
+    background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 25%, #fbc2eb 50%, #a18cd1 75%, #fbc2eb 100%);
+}
+/* Cards */
+.metric-card {
+    border-radius: 18px;
+    padding: 16px 18px;
+    background: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+    text-align: center;
+    margin-bottom: 10px;
+}
+/* Headings */
+h1, h2, h3 {
+    color: #222;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+}
+/* Prediction box */
+.pred-box {
+    background: #ffffffcc;
+    border: 2px solid #ffffff;
+    border-radius: 16px;
+    padding: 18px;
+    text-align: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+/* About Section Links */
+.about-info span {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# Image URLs
+# -----------------------------
+ROCK_IMG_URL = "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1faa8.png"  # 🪨
+MINE_IMG_URL = "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4a3.png"  # 💣
+
+# -----------------------------
+# Helper Functions
+# -----------------------------
+@st.cache_data(show_spinner="Loading default dataset...")
+def load_default_data():
+    for path in ["/content/Sonar Data.csv", "Sonar Data.csv"]:
+        try:
+            return pd.read_csv(path, header=None)
+        except Exception:
+            continue
+    return None
+
+def split_X_y(df):
+    X = df.drop(columns=60, axis=1).astype(float)
+    y = df[60].astype(str)
+    return X, y
+
+@st.cache_resource(show_spinner="Training models...")
+def train_models(X, y, test_size=0.10, random_state=1):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, stratify=y, random_state=random_state)
+    models = {
+        "Logistic Regression": Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(max_iter=1000, random_state=42))]),
+        "SVM (Linear)": Pipeline([("scaler", StandardScaler()), ("clf", SVC(kernel="linear", probability=True, random_state=42))]),
+        "KNN (k=5)": Pipeline([("scaler", StandardScaler()), ("clf", KNeighborsClassifier(n_neighbors=5))])
+    }
+    rows = []
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        train_acc = accuracy_score(y_train, model.predict(X_train))
+        test_acc  = accuracy_score(y_test,  model.predict(X_test))
+        rows.append({"Model": name, "Training Accuracy": train_acc, "Test Accuracy": test_acc})
+    metrics = pd.DataFrame(rows).sort_values("Test Accuracy", ascending=False).reset_index(drop=True)
+    return models, metrics, X_test, y_test
+
+def predict_with_proba(model, Xrow):
+    pred = model.predict(Xrow)[0]
+    proba = np.max(model.predict_proba(Xrow)) if hasattr(model, "predict_proba") else None
+    return pred, proba
+
+# -----------------------------
+# Sidebar
+# -----------------------------
+st.sidebar.header("📌 Navigation")
+page = st.sidebar.radio("Go to", ["Homepage", "Upload / Input", "Model Selection & Results", "About"])
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📥 Dataset")
+src = st.sidebar.radio("Source", ["Use default (Sonar Data.csv)", "Upload CSV"])
+
+uploaded_df = None
+if src == "Upload CSV":
+    up = st.sidebar.file_uploader("Upload Sonar CSV (60 or 61 columns)", type=["csv"])
+    if up:
+        try:
+            uploaded_df = pd.read_csv(up, header=None)
+            st.sidebar.success("Dataset uploaded ✔")
+        except Exception as e:
+            st.sidebar.error(f"Could not read CSV: {e}")
+
+df = uploaded_df if uploaded_df is not None else load_default_data()
+
+# =============================
+# 🏠 Homepage
+# =============================
+if page == "Homepage":
+    st.title("🪨💣 Rock vs Mine Prediction System")
+    st.markdown("Welcome to the interactive dashboard for classifying sonar signals. This tool leverages machine learning to distinguish between underwater rocks and mines with high accuracy.")
+
+    if df is not None:
+        st.markdown("### 📊 Dataset Overview")
+        col1, col2 = st.columns([1, 1.5], gap="large")
+
+        with col1:
+            st.markdown("#### Key Metrics")
+            n_samples = df.shape[0]
+            n_features = df.shape[1] - 1
+            mine_count = df[60].value_counts().get('M', 0)
+            rock_count = df[60].value_counts().get('R', 0)
+
+            st.markdown(f"""
+            <div class='metric-card'>
+                <h4>{n_samples}</h4>
+                <p>Total Samples</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class='metric-card'>
+                <h4>{rock_count} 🪨 / {mine_count} 💣</h4>
+                <p>Rocks / Mines</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            st.markdown("#### Class Distribution")
+            fig, ax = plt.subplots(facecolor='none')
+            df[60].value_counts().plot.pie(
+                autopct='%1.1f%%',
+                labels=['Mines (M)', 'Rocks (R)'],
+                colors=['#FF686B', '#84D2C5'],
+                explode=(0, 0.05),
+                ax=ax,
+                textprops={'color':"w", 'weight':'bold'}
+            )
+            ax.set_ylabel('')
+            st.pyplot(fig)
+
+        st.markdown("###  A glimpse of the data:")
+        st.dataframe(df.head(), use_container_width=True)
+    else:
+        st.warning("No dataset found. Please upload one via the sidebar or ensure 'Sonar Data.csv' is available.")
+
+# =============================
+# 📂 Upload / Input Section
+# =============================
+elif page == "Upload / Input":
+    st.header("📂 Data Input Section")
+    tabs = st.tabs(["✍️ Manual Input (Single Prediction)", "📄 Upload CSV (Batch Prediction)"])
+
+    with tabs[0]:
+        st.write("Enter **exactly 60** numeric, comma-separated values for a single prediction.")
+        example_input = "0.02,0.0371,0.0428,0.0207,0.0954,0.0986,0.1539,0.1601,0.3109,0.2111,0.1609,0.1582,0.2238,0.0645,0.066,0.2273,0.31,0.2999,0.5078,0.4797,0.5783,0.5071,0.4328,0.555,0.6711,0.6415,0.7104,0.808,0.6791,0.3857,0.1307,0.2604,0.5121,0.7547,0.8537,0.8507,0.6692,0.6097,0.4943,0.2744,0.051,0.2834,0.2825,0.4256,0.2641,0.1386,0.1051,0.1343,0.0383,0.0324,0.0232,0.0027,0.0065,0.0159,0.0072,0.0167,0.018,0.0084,0.009,0.0032"
+        manual_input_text = st.text_area("Paste 60 comma-separated values:", value=example_input, height=100)
+
+        if st.button("Save Manual Input"):
+            try:
+                values = [float(v.strip()) for v in manual_input_text.split(',')]
+                if len(values) == 60:
+                    st.session_state.manual_row = np.array(values).reshape(1, -1)
+                    st.success("Saved manual input ✔ Go to **Model Selection & Results**.")
+                else:
+                    st.error(f"Error: Expected 60 values, but found {len(values)}.")
+            except:
+                st.error("Error: Please ensure all values are numeric and comma-separated.")
+
+    with tabs[1]:
+        st.write("Upload a CSV with **60 feature columns** per row (a 61st label column will be ignored).")
+        up_batch = st.file_uploader("Upload CSV", type=["csv"], key="batch_uploader")
+        if up_batch:
+            try:
+                batch_df_raw = pd.read_csv(up_batch, header=None)
+                if batch_df_raw.shape[1] == 61:
+                    st.info("ℹ️ Detected 61 columns. The last column will be ignored.")
+                    st.session_state.batch_df = batch_df_raw.iloc[:, :-1]
+                elif batch_df_raw.shape[1] == 60:
+                    st.session_state.batch_df = batch_df_raw
+                else:
+                    st.error(f"Error: Expected 60 or 61 columns, found {batch_df_raw.shape[1]}.")
+
+                if 'batch_df' in st.session_state:
+                    st.success(f"Loaded {len(st.session_state.batch_df)} rows ✔ Go to **Model Selection & Results**.")
+            except Exception as e:
+                st.error(f"Could not read CSV: {e}")
+
+# =============================
+# ⚙️ Model Selection & Results
+# =============================
+elif page == "Model Selection & Results":
+    st.header("⚙️ Model Selection & Results")
+    if df is None:
+        st.warning("No dataset found. Please upload one via the sidebar.")
+        st.stop()
+
+    # --- Training Section ---
+    c1, c2, c3 = st.columns([1,1,1])
+    test_size = c1.slider("Test Size", 0.05, 0.30, 0.10, 0.01)
+    random_state = c2.number_input("Random State", 0, 9999, 1)
+    if c3.button("🚀 Train / Retrain Models"):
+        keys_to_clear = ['models', 'metrics', 'X_test', 'y_test']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
+    X, y = split_X_y(df)
+    if "models" not in st.session_state:
+        models, metrics, X_test, y_test = train_models(X, y, test_size=test_size, random_state=random_state)
+        st.session_state.models, st.session_state.metrics, st.session_state.X_test, st.session_state.y_test = models, metrics, X_test, y_test
+
+    models, metrics = st.session_state.models, st.session_state.metrics
+    model_choice = st.selectbox("Choose Model", list(models.keys()) + ["Compare All Models"])
+
+    st.subheader("📊 Accuracy Summary")
+    st.dataframe(metrics, use_container_width=True)
+    if model_choice == "Compare All Models":
+        # --- FIX: Bar chart color logic updated ---
+        # Create a color map and add it as a new column to the DataFrame
+        color_map = {
+            "Logistic Regression": "#FF4B4B",
+            "SVM (Linear)": "#3D85C6",
+            "KNN (k=5)": "#6AA84F"
+        }
+        # Ensure model names in metrics match keys in color_map
+        metrics['color'] = metrics['Model'].map(color_map).fillna('grey') # Fallback to grey if name mismatch
+
+        # Use the new 'color' column to color the bars
+        st.bar_chart(metrics, x='Model', y='Test Accuracy', color='color')
+
+    # --- Prediction Section ---
+    st.markdown("---")
+    st.subheader("🔮 Predict")
+    pred_mode = st.radio("Use:", ["A sample from test set", "Manual Input (saved)", "Batch CSV (saved)"], horizontal=True)
+
+    row = None
+    # Logic for Test Set Sample
+    if pred_mode == "A sample from test set":
+        X_test = st.session_state.X_test
+        idx = st.slider("Pick test sample index", 0, len(X_test)-1, 0)
+        row = X_test.iloc[[idx]]
+
+    # Logic for Manual Input
+    elif pred_mode == "Manual Input (saved)":
+        if "manual_row" not in st.session_state:
+            st.info("Go to **Upload / Input → Manual Input** and save a row first.")
+            st.stop()
+        row = st.session_state.manual_row
+        with st.expander("View Saved Manual Input"):
+            st.code(str(row.flatten()))
+
+    # Logic for Batch CSV
+    else: # Batch Mode
+        if "batch_df" not in st.session_state:
+            st.info("Go to **Upload / Input → Upload CSV** and upload a file first.")
+            st.stop()
+        batch_df = st.session_state.batch_df
+        if model_choice == "Compare All Models":
+            st.warning("For batch mode, please pick one model to view detailed predictions.")
+            st.stop()
+
+        m = models[model_choice]
+        preds = m.predict(batch_df)
+        probas = np.max(m.predict_proba(batch_df), axis=1) if hasattr(m, "predict_proba") else None
+
+        out = pd.DataFrame({
+            "Prediction": ["Rock (R)" if p == "R" else "Mine (M)" for p in preds],
+            "Confidence": [f"{p*100:.2f}%" for p in probas] if probas is not None else "N/A"
+        })
+        st.dataframe(out, use_container_width=True)
+
+        st.caption("Visual summary for the first few rows:")
+        n_show = min(12, len(out))
+        icon_cols = st.columns(6)
+        for i in range(n_show):
+            c = icon_cols[i % 6]
+            with c:
+                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                if preds[i] == "R":
+                    st.image(ROCK_IMG_URL, width=40)
+                    st.write(f"**Row {i} → Rock**")
+                else:
+                    st.image(MINE_IMG_URL, width=40)
+                    st.write(f"**Row {i} → Mine**")
+                if probas is not None:
+                    st.caption(f"{probas[i]*100:.1f}%")
+                st.markdown("</div>", unsafe_allow_html=True)
+        st.stop()
+
+    # --- Display Logic for SINGLE ROW Predictions (Test Sample & Manual) ---
+    if row is not None:
+        if model_choice == "Compare All Models":
+            cols = st.columns(3)
+            for i, (name, m) in enumerate(models.items()):
+                with cols[i]:
+                    pred, proba = predict_with_proba(m, row)
+                    st.markdown(f"**{name}**")
+                    st.image(ROCK_IMG_URL if pred == 'R' else MINE_IMG_URL, width=80)
+                    _ = st.success("Prediction: Rock (R)") if pred == 'R' else st.error("Prediction: Mine (M)")
+                    if proba: st.caption(f"Confidence: {proba*100:.2f}%")
+        else:
+            m = models[model_choice]
+            pred, proba = predict_with_proba(m, row)
+
+            # --- REMOVED: Confusion matrix section and columns ---
+            st.markdown("<div class='pred-box'>", unsafe_allow_html=True)
+            st.image(ROCK_IMG_URL if pred == 'R' else MINE_IMG_URL, width=100)
+            _ = st.success("Prediction: Rock (R)") if pred == 'R' else st.error("Prediction: Mine (M)")
+            if proba: st.write(f"**Confidence:** {proba*100:.2f}%")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# =============================
+# ℹ️ About
+# =============================
+elif page == "About":
+    st.header("ℹ️ About the Dataset & Project")
+    st.write("""
+**Dataset:** This project uses the UCI Sonar dataset. Each row contains **60 numeric features** representing sonar returns bounced off an object at various angles, and a label:
+- **R** = Rock (🪨)
+- **M** = Mine (💣)
+
+**Goal:** To predict whether an object is a **Rock or a Mine** based on its sonar signature.
+
+**Models Used:** Logistic Regression, SVM (Linear), KNN (k=5). Each model is embedded in a **Pipeline** with **StandardScaler** to prevent data leakage and ensure robust performance.
+""")
+    st.markdown("---")
+
+    st.markdown("""
+    <div class='about-info'>
+        <p>🧑‍🎓 <b>Student:</b> <span style='color: #FF4B4B;'>MD.MOHIMINUL ISLAM</span> (ID: 2031084042)</p>
+        <p>👨‍🏫 <b>Supervisor:</b> <span style='color: #3D85C6;'>MR.MUHAMMAD SHAFYAT OSMAN</span></p>
+        <p>🏛️ <b>University:</b> <span style='color: #6AA84F;'>North South University (NSU)</span></p>
+        <p>📚 <b>Course:</b> <span style='color: #E69138;'>CSE299 (Junior Design Project)</span></p>
+    </div>
+    """, unsafe_allow_html=True)
